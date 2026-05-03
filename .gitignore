@@ -27,6 +27,10 @@ go.work.sum
 # env file
 .env
 
+# Built binary
+/mcpscope
+/dist/
+
 # Editor/IDE
 # .idea/
 # .vscode/
