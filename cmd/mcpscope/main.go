@@ -9,8 +9,10 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sagetta1/mcpscope/internal/proxy"
@@ -104,7 +106,14 @@ func runWrap(args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "mcpscope: capturing session %s\n", w.SessionID)
 
-	code, err := w.Run(context.Background(), target, targetArgs)
+	// MCP clients (Claude Desktop, Claude Code) terminate the wrap process
+	// with SIGTERM when they restart or shut down. Catch it so subprocess
+	// shutdown propagates cleanly through cmd.Wait → defer EndSession,
+	// otherwise sessions stay marked (running) forever in the timeline.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	code, err := w.Run(ctx, target, targetArgs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "wrap: %v\n", err)
 		return 1
