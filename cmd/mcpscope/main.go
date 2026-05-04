@@ -5,8 +5,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -20,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sagetta1/mcpscope/internal/install"
 	"github.com/sagetta1/mcpscope/internal/proxy"
 	"github.com/sagetta1/mcpscope/internal/storage"
 	"github.com/sagetta1/mcpscope/internal/ui"
@@ -44,8 +47,9 @@ func main() {
 	case "ui":
 		os.Exit(runUI(args))
 	case "install":
-		fmt.Fprintln(os.Stderr, "install: not implemented yet — coming in week 3")
-		os.Exit(1)
+		os.Exit(runInstall(args))
+	case "uninstall":
+		os.Exit(runUninstall(args))
 	case "version", "-v", "--version":
 		fmt.Println("mcpscope", version)
 	case "help", "-h", "--help":
@@ -65,7 +69,10 @@ Usage:
   mcpscope sessions                        List recorded sessions
   mcpscope show <session_id>               Show messages from a session
   mcpscope ui [--port N] [--no-open]       Open web UI on localhost:3939
-  mcpscope install                         Auto-detect and patch Claude Desktop config (planned)
+  mcpscope install [--apply] [--target=desktop|code] [--all]
+                                           Wrap MCP servers in Claude config (dry-run by default)
+  mcpscope uninstall [--apply] [--target=desktop|code] [--all]
+                                           Reverse install (dry-run by default)
   mcpscope version                         Show version
   mcpscope help                            Show this help
 
@@ -223,6 +230,173 @@ func openBrowser(url string) {
 		args = []string{url}
 	}
 	_ = exec.Command(cmd, args...).Start()
+}
+
+// --- install / uninstall ---
+
+func runInstall(args []string) int {
+	return runWrapOrUnwrap(args, "install", install.WrapServer, false)
+}
+
+func runUninstall(args []string) int {
+	return runWrapOrUnwrap(args, "uninstall", nil, true)
+}
+
+// runWrapOrUnwrap is the shared flow for both directions. transformIn
+// is the wrap function (install). For uninstall, isUninstall=true and
+// install.UnwrapServer is used implicitly.
+func runWrapOrUnwrap(
+	args []string,
+	cmdName string,
+	transformIn func(install.Server, string) install.Server,
+	isUninstall bool,
+) int {
+	fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
+	apply := fs.Bool("apply", false, "actually write changes (default: dry-run)")
+	all := fs.Bool("all", false, "skip per-server prompt; act on every applicable server")
+	targetStr := fs.String("target", "desktop", "which client config to edit: desktop or code")
+	binPath := fs.String("mcpscope-path", "", "override the mcpscope binary path written into the config (default: this binary)")
+	configPath := fs.String("config-path", "", "override the JSON config path (advanced/testing)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	target := install.Target(*targetStr)
+	if target != install.TargetDesktop && target != install.TargetCode {
+		fmt.Fprintf(os.Stderr, "%s: --target must be 'desktop' or 'code', got %q\n", cmdName, *targetStr)
+		return 2
+	}
+
+	var path string
+	if *configPath != "" {
+		path = *configPath
+	} else {
+		var err error
+		path, err = install.ConfigPath(target)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", cmdName, err)
+			return 1
+		}
+	}
+
+	mcpscopePath, err := install.CurrentMcpscopePath(*binPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: locate mcpscope binary: %v\n", cmdName, err)
+		return 1
+	}
+
+	cfg, err := install.ReadConfig(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "%s: %s does not exist. Is the client installed and run at least once?\n", cmdName, path)
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "%s: read %s: %v\n", cmdName, path, err)
+		return 1
+	}
+
+	servers, err := cfg.Servers()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", cmdName, err)
+		return 1
+	}
+
+	if len(servers) == 0 {
+		fmt.Fprintf(os.Stderr, "%s: no MCP servers in %s. Add one in %s first.\n", cmdName, path, target)
+		return 0
+	}
+
+	// Snapshot original bytes for diff output later.
+	beforeBytes, _ := cfg.Bytes()
+
+	// Decide what to change for each server.
+	changed := false
+	reader := bufio.NewReader(os.Stdin)
+	for name, s := range servers {
+		var newServer install.Server
+		var act bool
+
+		if isUninstall {
+			unwrapped, ok := install.UnwrapServer(s, mcpscopePath)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "  [%s] not wrapped — skip\n", name)
+				continue
+			}
+			act = *all || promptYN(reader, fmt.Sprintf("  [%s] unwrap (was: %s wrap -- %s ...)? [y/N] ", name, mcpscopePath, unwrapped.Command))
+			newServer = unwrapped
+		} else {
+			if install.IsWrapped(s, mcpscopePath) {
+				fmt.Fprintf(os.Stderr, "  [%s] already wrapped — skip\n", name)
+				continue
+			}
+			act = *all || promptYN(reader, fmt.Sprintf("  [%s] wrap (command=%s)? [y/N] ", name, s.Command))
+			newServer = transformIn(s, mcpscopePath)
+		}
+
+		if !act {
+			continue
+		}
+		servers[name] = newServer
+		changed = true
+	}
+
+	if !changed {
+		fmt.Fprintf(os.Stderr, "%s: nothing to do.\n", cmdName)
+		return 0
+	}
+
+	if err := cfg.SetServers(servers); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", cmdName, err)
+		return 1
+	}
+	afterBytes, err := cfg.Bytes()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", cmdName, err)
+		return 1
+	}
+
+	// Print diff (always, even at apply — the user wants a final receipt).
+	fmt.Fprintln(os.Stderr)
+	install.PrintUnifiedDiff(os.Stderr, path, path+" (proposed)", string(beforeBytes), string(afterBytes), isatty(os.Stderr))
+	fmt.Fprintln(os.Stderr)
+
+	if !*apply {
+		fmt.Fprintln(os.Stderr, "Dry-run only. Re-run with --apply to write the change.")
+		return 0
+	}
+
+	backupPath, err := install.BackupConfig(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: backup failed: %v\n", cmdName, err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "Backup written: %s\n", backupPath)
+
+	if err := install.WriteConfigAtomic(path, cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: write failed (backup is at %s): %v\n", cmdName, backupPath, err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "Wrote %s. Restart the client for the change to take effect.\n", path)
+	fmt.Fprintf(os.Stderr, "Revert any time: mv %s %s\n", backupPath, path)
+	return 0
+}
+
+func promptYN(r *bufio.Reader, prompt string) bool {
+	fmt.Fprint(os.Stderr, prompt)
+	line, err := r.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	line = strings.TrimSpace(strings.ToLower(line))
+	return line == "y" || line == "yes"
+}
+
+func isatty(f *os.File) bool {
+	stat, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
 }
 
 func runShow(args []string) int {
