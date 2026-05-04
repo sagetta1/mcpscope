@@ -6,10 +6,11 @@ A transparent proxy that sits between an MCP client (Claude Desktop, Cursor,
 Continue) and an MCP server, capturing JSON-RPC traffic and exposing it through
 a local web UI: timeline, request/response diff, replay, token cost overlay.
 
-**Status:** pre-alpha (`v0.0.2-dev`). The stdio proxy captures, classifies,
+**Status:** pre-alpha (`v0.0.3-dev`). The stdio proxy captures, classifies,
 and persists JSON-RPC traffic to SQLite. CLI inspection works (`sessions`,
-`show <id>`). Web UI lands week 2. See the roadmap before trying to use this
-in anger.
+`show <id>`). Web UI on `localhost:3939` is wired up — sessions list,
+timeline, request/response detail, JSON diff, and a live SSE feed are
+shipped. See the roadmap before trying to use this in anger.
 
 ## Why
 
@@ -27,23 +28,32 @@ changes to the client or the server.
 ## Roadmap
 
 - **Week 1** — ✅ stdio proxy + JSON-RPC parsing + SQLite persistence + `sessions` / `show` CLI
-- **Week 2** — React + Vite UI embedded in the binary, five screens (sessions list, timeline, message detail, diff, live mode)
+- **Week 2** — ✅ React + Vite UI embedded in the binary; five screens (sessions list, timeline, message detail, diff, live SSE feed)
 - **Week 3** — `mcpscope install` auto-detects Claude Desktop config; tiktoken-based cost overlay; GoReleaser cross-platform builds
 - **Week 4** — `v0.1.0` release, landing page, first design-partner outreach
 
 ## Build from source
 
+Requires Go 1.24+ and Node 20+. The Makefile bundles the React UI into the
+Go binary via `embed.FS` — one binary, no runtime deps.
+
 ```sh
 git clone https://github.com/sagetta1/mcpscope
 cd mcpscope
-go build -o mcpscope ./cmd/mcpscope
-./mcpscope version
+make build              # cd internal/ui/frontend && npm install && npm run build, then go build
 ./mcpscope wrap -- npx -y @modelcontextprotocol/server-filesystem /tmp
-./mcpscope sessions
-./mcpscope show <session_id>
+./mcpscope sessions     # CLI list
+./mcpscope ui           # opens http://localhost:3939 in your browser
 ```
 
 Captures land in `~/.mcpscope/sessions.db` (SQLite, WAL mode).
+
+For frontend dev with hot reload, run two terminals:
+
+```sh
+./mcpscope ui --port 3939 --no-open       # backend
+cd internal/ui/frontend && npm run dev    # vite proxies /api → :3939
+```
 
 ## License
 
