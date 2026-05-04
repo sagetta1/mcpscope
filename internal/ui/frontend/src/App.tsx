@@ -1,78 +1,48 @@
 import { useEffect, useState } from 'react'
+import { SessionsList } from './screens/SessionsList'
+import { Timeline } from './screens/Timeline'
 
-type Session = {
-  id: string
-  started_at: number
-  ended_at?: number
-  target_cmd: string
-  msg_count: number
-}
-
-function fmtTs(ms: number): string {
-  return new Date(ms).toISOString().replace('T', ' ').slice(0, 19)
+// Hash-based router: avoids react-router-dom (-50 KB) and works as a static
+// asset embedded in the Go binary. Routes:
+//   #/                       → SessionsList
+//   #/session/<id>           → Timeline + MessageDetail split-pane
+//   #/session/<id>/diff      → (Day 9) Diff selection
+//   #/session/<id>/live      → (Day 10) Live SSE mode
+function parseHash(hash: string): { route: string; sessionID?: string; sub?: string } {
+  // strip leading "#"
+  const path = hash.replace(/^#/, '').replace(/^\//, '')
+  const parts = path.split('/').filter(Boolean)
+  if (parts.length === 0) return { route: 'list' }
+  if (parts[0] === 'session' && parts[1]) {
+    return { route: 'session', sessionID: parts[1], sub: parts[2] }
+  }
+  return { route: 'list' }
 }
 
 function App() {
-  const [sessions, setSessions] = useState<Session[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
+  const [hash, setHash] = useState(window.location.hash)
   useEffect(() => {
-    fetch('/api/sessions?limit=50')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then(setSessions)
-      .catch((e) => setError(String(e)))
+    const onChange = () => setHash(window.location.hash)
+    window.addEventListener('hashchange', onChange)
+    return () => window.removeEventListener('hashchange', onChange)
   }, [])
 
+  const route = parseHash(hash)
+
   return (
-    <div className="min-h-screen p-6 font-sans">
-      <header className="mb-6 flex items-baseline gap-3">
-        <h1 className="text-xl font-semibold text-white">mcpscope</h1>
-        <span className="text-sm text-gray-400">Chrome DevTools for the Model Context Protocol</span>
+    <div className="min-h-screen p-4 font-sans">
+      <header className="mb-4 flex items-baseline gap-3">
+        <a href="#/" className="text-xl font-semibold text-white hover:text-blue-300">
+          mcpscope
+        </a>
+        <span className="text-xs text-gray-500">DevTools for the Model Context Protocol</span>
+        {route.route === 'session' && (
+          <span className="ml-auto font-mono text-xs text-gray-400">{route.sessionID}</span>
+        )}
       </header>
 
-      {error && (
-        <div className="rounded border border-red-700 bg-red-900/30 p-3 text-sm text-red-300">
-          Failed to load sessions: {error}
-        </div>
-      )}
-
-      {!sessions && !error && <p className="text-sm text-gray-500">Loading…</p>}
-
-      {sessions && sessions.length === 0 && (
-        <p className="text-sm text-gray-500">
-          No sessions yet — run{' '}
-          <code className="font-mono text-gray-300">mcpscope wrap -- &lt;command&gt;</code> first.
-        </p>
-      )}
-
-      {sessions && sessions.length > 0 && (
-        <table className="w-full border-collapse text-sm">
-          <thead className="text-left text-gray-400">
-            <tr className="border-b border-gray-800">
-              <th className="py-2 pr-4 font-medium">Session</th>
-              <th className="py-2 pr-4 font-medium">Started</th>
-              <th className="py-2 pr-4 font-medium">Ended</th>
-              <th className="py-2 pr-4 font-medium text-right">Msgs</th>
-              <th className="py-2 pr-4 font-medium">Command</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sessions.map((s) => (
-              <tr key={s.id} className="border-b border-gray-900 hover:bg-gray-900/50">
-                <td className="py-1.5 pr-4 font-mono text-xs text-gray-300">{s.id}</td>
-                <td className="py-1.5 pr-4 font-mono text-xs text-gray-400">{fmtTs(s.started_at)}</td>
-                <td className="py-1.5 pr-4 font-mono text-xs text-gray-500">
-                  {s.ended_at ? fmtTs(s.ended_at) : <span className="text-amber-400">(running)</span>}
-                </td>
-                <td className="py-1.5 pr-4 text-right tabular-nums text-gray-300">{s.msg_count}</td>
-                <td className="py-1.5 pr-4 truncate font-mono text-xs text-gray-400" style={{ maxWidth: '40ch' }}>
-                  {s.target_cmd}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {route.route === 'list' && <SessionsList />}
+      {route.route === 'session' && route.sessionID && <Timeline sessionID={route.sessionID} />}
     </div>
   )
 }
