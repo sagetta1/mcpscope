@@ -7,19 +7,25 @@ package main
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/sagetta1/mcpscope/internal/proxy"
 	"github.com/sagetta1/mcpscope/internal/storage"
+	"github.com/sagetta1/mcpscope/internal/ui"
 )
 
-const version = "v0.0.2-dev"
+const version = "v0.0.3-dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -36,8 +42,7 @@ func main() {
 	case "show":
 		os.Exit(runShow(args))
 	case "ui":
-		fmt.Fprintln(os.Stderr, "ui: not implemented yet — coming in week 2")
-		os.Exit(1)
+		os.Exit(runUI(args))
 	case "install":
 		fmt.Fprintln(os.Stderr, "install: not implemented yet — coming in week 3")
 		os.Exit(1)
@@ -59,7 +64,7 @@ Usage:
   mcpscope wrap -- <command> [args...]    Run command as MCP server, capture JSON-RPC traffic
   mcpscope sessions                        List recorded sessions
   mcpscope show <session_id>               Show messages from a session
-  mcpscope ui                              Open web UI on localhost:3939 (planned)
+  mcpscope ui [--port N] [--no-open]       Open web UI on localhost:3939
   mcpscope install                         Auto-detect and patch Claude Desktop config (planned)
   mcpscope version                         Show version
   mcpscope help                            Show this help
@@ -148,6 +153,76 @@ func runSessions() int {
 		fmt.Printf("%-22s  %-19s  %-19s  %5d  %s\n", r.ID, started, ended, r.MsgCount, truncate(r.TargetCmd, 60))
 	}
 	return 0
+}
+
+func runUI(args []string) int {
+	fs := flag.NewFlagSet("ui", flag.ContinueOnError)
+	port := fs.Int("port", 3939, "TCP port to listen on (localhost only)")
+	noOpen := fs.Bool("no-open", false, "do not open the browser")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	store, err := storage.Open(defaultDBPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ui: open store: %v\n", err)
+		return 1
+	}
+	defer store.Close()
+
+	addr := fmt.Sprintf("127.0.0.1:%d", *port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ui: listen %s: %v\n", addr, err)
+		return 1
+	}
+
+	url := fmt.Sprintf("http://%s/", ln.Addr().String())
+	fmt.Fprintf(os.Stderr, "mcpscope ui: serving %s (Ctrl+C to stop)\n", url)
+	if !*noOpen {
+		go openBrowser(url)
+	}
+
+	srv := &http.Server{Handler: ui.NewServer(store), ReadHeaderTimeout: 5 * time.Second}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ln) }()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+		return 0
+	case err := <-errCh:
+		if err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "ui: serve: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+}
+
+// openBrowser tries to open url in the user's default browser. Best-effort —
+// failure is silent because users on headless boxes will pass --no-open.
+func openBrowser(url string) {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+		args = []string{url}
+	case "windows":
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler", url}
+	default: // linux + bsd
+		cmd = "xdg-open"
+		args = []string{url}
+	}
+	_ = exec.Command(cmd, args...).Start()
 }
 
 func runShow(args []string) int {

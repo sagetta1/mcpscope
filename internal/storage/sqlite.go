@@ -143,8 +143,11 @@ LIMIT ?`, limit)
 	return out, rows.Err()
 }
 
-// MessageRow is one row returned by ListMessages.
+// MessageRow is one row returned by ListMessages or MessagesSince. ID is the
+// monotonic auto-increment primary key from the messages table — used as a
+// cursor for incremental polling (MessagesSince).
 type MessageRow struct {
+	ID        int64
 	TS        int64
 	Direction string
 	Kind      string
@@ -155,11 +158,18 @@ type MessageRow struct {
 
 // ListMessages returns all messages in a session, oldest first.
 func (s *Store) ListMessages(ctx context.Context, sessionID string) ([]MessageRow, error) {
+	return s.MessagesSince(ctx, sessionID, 0)
+}
+
+// MessagesSince returns messages with id > afterID for the given session,
+// oldest first. Pass afterID=0 for a full read; pass the last seen id to
+// poll for new messages (used by SSE live mode).
+func (s *Store) MessagesSince(ctx context.Context, sessionID string, afterID int64) ([]MessageRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT ts, direction, kind, jsonrpc_id, method, raw
+SELECT id, ts, direction, kind, jsonrpc_id, method, raw
 FROM messages
-WHERE session_id = ?
-ORDER BY id ASC`, sessionID)
+WHERE session_id = ? AND id > ?
+ORDER BY id ASC`, sessionID, afterID)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +178,7 @@ ORDER BY id ASC`, sessionID)
 	var out []MessageRow
 	for rows.Next() {
 		var r MessageRow
-		if err := rows.Scan(&r.TS, &r.Direction, &r.Kind, &r.JSONRPCID, &r.Method, &r.Raw); err != nil {
+		if err := rows.Scan(&r.ID, &r.TS, &r.Direction, &r.Kind, &r.JSONRPCID, &r.Method, &r.Raw); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
