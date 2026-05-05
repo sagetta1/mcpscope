@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mcpscope — DevTools for the Model Context Protocol</title>
+<meta name="description" content="Passive transparent proxy that captures every JSON-RPC message between Claude Desktop / Cursor / Continue and your MCP server, and shows it on a local timeline you can grep, diff, and replay.">
+<style>
+  :root {
+    --bg: #0d1117; --fg: #c9d1d9; --muted: #8b949e;
+    --accent: #58a6ff; --border: #30363d; --code-bg: #161b22;
+    --warn: #d29922;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 4rem 1.5rem 6rem; }
+  h1 { font-size: 2.4rem; margin: 0 0 0.6rem; letter-spacing: -0.02em; color: #fff; }
+  h1 .scope { color: var(--accent); }
+  h2 { font-size: 1.15rem; margin: 2.5rem 0 1rem; color: #fff; }
+  p, ul { color: var(--fg); }
+  .tagline { font-size: 1.15rem; color: var(--muted); margin: 0 0 2.5rem; max-width: 50ch; }
+  .demo-frame {
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    background: var(--code-bg); margin: 1rem 0 2.5rem;
+    aspect-ratio: 16 / 10; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem; text-align: center; padding: 2rem;
+  }
+  .demo-frame strong { color: var(--fg); display: block; margin-bottom: 0.5rem; }
+  ul.bullets { padding-left: 1.2rem; }
+  ul.bullets li { margin: 0.7rem 0; }
+  ul.bullets li b { color: #fff; }
+  pre, code {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0.15rem 0.4rem;
+    font: 0.9rem ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--fg);
+  }
+  pre { padding: 0.9rem 1rem; overflow-x: auto; }
+  pre code { background: none; border: none; padding: 0; }
+  a { color: var(--accent); }
+  .waitlist {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 1.5rem; background: var(--code-bg); margin: 2.5rem 0;
+  }
+  .waitlist iframe {
+    width: 100%; min-height: 200px; border: 0; background: transparent;
+  }
+  .waitlist .fallback {
+    color: var(--muted); font-size: 0.9rem; margin: 0;
+  }
+  .badge-warn {
+    display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px;
+    background: rgba(210, 153, 34, 0.15); color: var(--warn);
+    font-size: 0.8rem; font-family: ui-monospace, monospace; border: 1px solid var(--warn);
+  }
+  footer {
+    margin-top: 5rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 0.85rem;
+  }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+  <span class="badge-warn">v0.1.0 — pre-release</span>
+
+  <h1>mcp<span class="scope">scope</span></h1>
+  <p class="tagline">DevTools for the Model Context Protocol — passive capture of every JSON-RPC message between Claude Desktop / Cursor / Continue and your MCP server.</p>
+
+  <div class="demo-frame">
+    <div>
+      <strong>Demo GIF (45-60s)</strong>
+      <code>./mcpscope install &amp;&amp; mcpscope ui</code>
+      <br>placeholder — replace with screencast before publishing
+    </div>
+  </div>
+
+  <h2>What it does</h2>
+  <ul class="bullets">
+    <li><b>Sits in the path.</b> One <code>mcpscope install</code> wraps every MCP server in your Claude Desktop or Claude Code config. No code changes, no SDK. Restart Claude — every JSON-RPC request and response is captured to a local SQLite DB.</li>
+    <li><b>Persistent timeline you can grep, diff, replay.</b> Browse sessions in a local web UI on <code>localhost:3939</code>. Side-by-side request/response, structured diff between two calls of the same tool, live SSE feed for the session running right now.</li>
+    <li><b>Local-first, single binary, Apache 2.0.</b> One Go binary, ~15 MB. SQLite is the only datastore. No cloud, no telemetry, no account. Token cost overlay (cl100k_base, ±20% for Claude). Source is <a href="https://github.com/sagetta1/mcpscope">github.com/sagetta1/mcpscope</a>.</li>
+  </ul>
+
+  <h2>Get notified when v0.1.0 ships</h2>
+  <div class="waitlist">
+    <!-- Replace TALLY_FORM_ID with the form ID after creating one at tally.so (no signup needed for embed). -->
+    <iframe
+      data-tally-src="https://tally.so/embed/TALLY_FORM_ID?alignLeft=1&hideTitle=0&transparentBackground=1&dynamicHeight=1"
+      loading="lazy"
+      title="mcpscope waitlist"
+      onerror="this.remove();document.querySelector('.fallback').style.display='block'"
+    ></iframe>
+    <p class="fallback" style="display:none">
+      Form not embedded yet — see <code>landing/README.md</code> for setup. Meanwhile,
+      <a href="https://github.com/sagetta1/mcpscope">watch the repo</a> for the v0.1.0 tag.
+    </p>
+    <script>
+      // Tally embed loader (official). Activates the iframe above.
+      var d=document,w="https://tally.so/widgets/embed.js",v=function(){
+        "undefined"!=typeof Tally?Tally.loadEmbeds():d.querySelectorAll("iframe[data-tally-src]:not([src])").forEach(function(e){e.src=e.dataset.tallySrc})
+      };
+      if("undefined"!=typeof Tally)v();
+      else if(d.querySelector('script[src="'+w+'"]')==null){
+        var s=d.createElement("script");s.src=w;s.onload=v;s.onerror=v;d.body.appendChild(s);
+      }
+    </script>
+  </div>
+
+  <h2>Try it from source today</h2>
+  <pre><code>git clone https://github.com/sagetta1/mcpscope
+cd mcpscope &amp;&amp; make build
+./mcpscope install                  # dry-run, shows the diff
+./mcpscope install --apply          # backup + atomic write
+./mcpscope ui                       # opens http://localhost:3939</code></pre>
+
+  <footer>
+    <a href="https://github.com/sagetta1/mcpscope">github.com/sagetta1/mcpscope</a>
+    · Apache 2.0
+    · sprint artifact (do-not-merge until 2026-05-12)
+  </footer>
+
+</main>
+</body>
+</html>
